@@ -1,0 +1,106 @@
+# This unit. All command run as root account
+# 1. Enable and run just test socket is working
+
+systemctl enable --now podman.socket
+systemctl status podman.socket
+curl -H "Content-Type: application/json" --unix-socket /run/podman/podman.sock http://localhost/_ping
+
+# 2. Running in Linux host with SELinux is protected and SELinux is not protected.
+
+podman run -v /:/hostfs alpine cat /hostfs/etc/passwd
+podman run –v /:/hostfs alpine cat /hostfs/etc/shadow
+setenforce 0
+podman run -v /:/hostfs alpine cat /hostfs/etc/passwd
+podman run –v /:/hostfs alpine cat /hostfs/etc/shadow
+
+# 3. If host is not protected with SELinux. Container volume mapping can write a file to host file system
+
+# Run on host
+podman run -it --rm --privileged -v /:/hostfs alpine
+# Run in container
+ /# echo “Container was here” > /hostfs/container-here.txt
+ /# exit
+
+# 4. Using API to interface to container run time instead of podman command line.
+
+podman pull docker.io/nginx:latest
+podman pull docker.io/alpine:latest
+
+# Run on host
+podman run -ti -v /run/podman/podman.sock:/run/podman/podman.sock docker.io/alpine sh
+
+# Run inside container
+ /# apk add --update jq curl
+
+ /# curl --unix-socket /run/podman/podman.sock -H "Content-Type: application/json" -d '{"Image": "alpine", "Cmd": ["echo", "hello world"]}' -X POST http://localhost/v1.41/containers/create
+ /# curl --unix-socket /run/podman/podman.sock -H "Content-type: application/json" -X POST http://d/v4.0.0/libpod/images/pull?reference=docker.io%2Flibrary%2Fnginx
+ /# curl --unix-socket /run/podman/podman.sock -H "Content-Type: application/json" -d '{"Image": "docker.io/nginx"}' -X POST http://localhost/v1.41/containers/create?name=nginx-by-api
+
+# Back to run on host
+curl --unix-socket /run/podman/podman.sock -X POST http://localhost/v1.41/containers/nginx-by-api/start
+curl --unix-socket /run/podman/podman.sock  http://d/v4.0.0/libpod/containers/nginx-by-api/json | jq
+
+
+# 5. Using API to list all containers. 
+curl --silent --unix-socket /run/podman/podman.sock http://localhost/v1.41/containers/json?all=1 | jq .[].Names
+
+# 6. Using API to create, start and inspect specific container
+curl --unix-socket /run/podman/podman.sock -H "Content-Type: application/json" -d '{"Image": "docker.io/library/nginx:latest"}' -X POST http://localhost/v1.41/containers/create?name=nginx
+curl --unix-socket /run/podman/podman.sock -X POST http://localhost/v1.41/containers/nginx/start
+curl --unix-socket /run/podman/podman.sock http://localhost/v1.41/containers/nginx/json | jq
+
+# 7. Create sample complex wordpress with with REST API
+curl -XPOST --unix-socket /run/podman/podman.sock -H content-type:application/json http://d/v4.0.0/libpod/images/pull?reference=docker.io%2Flibrary%2Fwordpress
+curl -XPOST --unix-socket /run/podman/podman.sock -H content-type:application/json http://d/v4.0.0/libpod/images/pull?reference=docker.io%2Flibrary%2Fmariadb
+
+# create wordpress pod name myapp parameter file
+# myapp.cfg
+{
+	"portmappings": [
+		{
+			"container_port": 80,
+			"host_port": 8080
+		}
+	],
+	"name": "myapp"
+}
+
+curl -X POST --unix-socket /run/podman/podman.sock -H content-type:application/json http://d/v4.0.0/libpod/pods/create -d @myapp.cfg
+
+# mydb.cfg
+{
+    "image" : "mariadb",
+    "env": {
+        "MYSQL_ROOT_PASSWORD": "w0rdpr3ss",
+        "MYSQL_DATABASE": "wp",
+        "MYSQL_USER" : "wordpress",
+        "MYSQL_PASSWORD" : "w0rdpr3ss"
+    },
+    "restart_policy": "always",
+    "pod": "myapp",
+    "name": "mariadb"
+}
+
+curl -XPOST --unix-socket /run/podman/podman.sock -H content-type:application/json http://d/v4.0.0/libpod/containers/create -d @mydb.cfg
+
+# wordpress.cfg
+{
+    "image" : "wordpress",
+    "env": {
+        "WORDPRESS_DB_NAME": "wp",
+        "WORDPRESS_DB_USER": "wordpress",
+        "WORDPRESS_DB_PASSWORD" : "w0rdpr3ss",
+        "WORDPRESS_DB_HOST" : "127.0.0.1"
+    },
+    "pod": "myapp",
+    "name": "wordpress"
+}
+
+curl -XPOST --unix-socket /run/podman/podman.sock -H content-type:application/json http://d/v4.0.0/libpod/containers/create -d @wordpress.cfg
+
+curl -XPOST --unix-socket /run/podman/podman.sock -H content-type:application/json http://d/v4.0.0/libpod/pods/myapp/start
+
+curl  --unix-socket /run/podman/podman.sock http://d/v4.0.0/libpod/pods/myapp/json | jq
+
+# open browser to your IP Address port 8080 to get Wordpress Installation.
+
