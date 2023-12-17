@@ -1,0 +1,2 @@
+openssl req -newkey rsa:4096 -nodes -sha256 -keyout certs/server.key -x509 -days 3650 -out certs/server.crt
+podman run -d --restart=always --name registry -v ~/certs:/opt/certs -e REGISTRY_HTTP_ADDR=0.0.0.0:5000 -e REGISTRY_HTTP_TLS_CERTIFICATE=/opt/certs/server.crt -e REGISTRY_HTTP_TLS_KEY=/opt/certs/server.key -p 5000:5000 registry:2
